@@ -26,6 +26,8 @@ BL31_SOURCES		+=	lib/cpus/aarch64/cortex_a72.S		\
 				drivers/rpi3/gpio/rpi3_gpio.c		\
 				plat/common/plat_gicv2.c                \
 				plat/rpi/rpi4/rpi4_bl31_setup.c		\
+				drivers/rpi3/mailbox/rpi3_mbox.c	\
+				plat/rpi/rpi4/rpi_clock.c		\
 				plat/rpi/common/rpi3_pm.c		\
 				plat/common/plat_psci_common.c		\
 				plat/rpi/common/rpi3_topology.c		\
@@ -85,6 +87,9 @@ RPI3_RUNTIME_UART		:= 0
 
 # Use normal memory mapping for ROM, FIP, SRAM and DRAM
 RPI3_USE_UEFI_MAP		:= 0
+
+# try to route all ints to el3 we care about..
+GICV2_G0_FOR_EL3                := 1
 
 # Process platform flags
 # ----------------------
