@@ -227,7 +227,17 @@ unsigned int plat_get_syscnt_freq2(void)
 
 uint32_t plat_ic_get_pending_interrupt_type(void)
 {
-	ERROR("rpi3: Interrupt routed to EL3.\n");
+	interrupt_type_handler_t hndlr;
+	hndlr = get_interrupt_type_handler(INTR_TYPE_EL3);
+	if (hndlr)
+	{
+		ERROR("rpi3: Interrupt routed to EL3 calling handler.\n");
+		hndlr(1, 1, NULL, NULL);
+	}
+	else
+	{
+		ERROR("rpi3: Interrupt routed to EL3.\n");
+	}
 	return INTR_TYPE_INVAL;
 }
 
