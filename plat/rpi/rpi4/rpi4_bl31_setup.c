@@ -10,6 +10,7 @@
 
 #include <platform_def.h>
 #include <arch_helpers.h>
+#include <bl31/interrupt_mgmt.h>
 #include <common/bl_common.h>
 #include <lib/mmio.h>
 #include <lib/xlat_tables/xlat_mmu_helpers.h>
@@ -34,9 +35,17 @@ extern uint32_t stub_magic;
 extern uint32_t dtb_ptr32;
 extern uint32_t kernel_entry32;
 
+#define SECURE_TRIGGER  32
+
+static const interrupt_prop_t rpi4_interrupt_props[] = {
+	INTR_PROP_DESC(SECURE_TRIGGER, GIC_HIGHEST_SEC_PRIORITY, GICV2_INTR_GROUP0, GIC_INTR_CFG_LEVEL), // take over the "arm mailbox"
+};
+
 static const gicv2_driver_data_t rpi4_gic_data = {
 	.gicd_base = RPI4_GIC_GICD_BASE,
 	.gicc_base = RPI4_GIC_GICC_BASE,
+	.interrupt_props = rpi4_interrupt_props,
+	.interrupt_props_num = ARRAY_SIZE(rpi4_interrupt_props),
 };
 
 /*
@@ -248,8 +257,53 @@ static void rpi4_prepare_dtb(void)
 	INFO("Changed device tree to advertise PSCI.\n");
 }
 
+int rpi4_vc_get_board_revision(uint32_t *revision);
+int rpi4_vc_get_clock(uint32_t *clock);
+int rpi4_vc_max_clock(uint32_t *clock);
+int rpi4_vc_set_clock(uint32_t clock);
+
+static uint64_t generic_mb_interrupt_handler(uint32_t id,
+											 uint32_t flags,
+											 void *handle,
+											 void *cookie)
+{
+	uint32_t irq, intr;
+	uint32_t ClockRate;
+	uint32_t mbox_val;
+	/* Acknowledge IRQ */
+	irq = plat_ic_acknowledge_interrupt();
+
+	intr = plat_ic_get_interrupt_id(irq);
+//	ERROR("interrupt: intr=%d\n", intr);
+	console_flush();
+
+	if (intr == SECURE_TRIGGER) {
+		mbox_val = mmio_read_32(0xFF800000+0xc0);
+		mmio_write_32(0xFF800000+0xc0, mbox_val);
+
+//		ERROR("interrupt: request clock to %d\n", mbox_val);
+
+		if (mbox_val > 2200) {
+			mbox_val = 2200;
+		} else if (mbox_val < 600) {
+			mbox_val = 600;
+		}
+
+		rpi4_vc_set_clock(mbox_val*1000000);
+
+		rpi4_vc_get_clock(&ClockRate);
+//		ERROR("clock rate %d\n",ClockRate);
+	}
+
+	plat_ic_end_of_interrupt(irq);
+	return 0;
+}
+
 void bl31_platform_setup(void)
 {
+	uint32_t int_flag;
+	uint32_t ClockRate;
+
 	rpi4_prepare_dtb();
 
 	/* Configure the interrupt controller */
@@ -257,4 +311,15 @@ void bl31_platform_setup(void)
 	gicv2_distif_init();
 	gicv2_pcpu_distif_init();
 	gicv2_cpuif_enable();
+
+	int_flag = 0U;
+	set_interrupt_rm_flag((int_flag), (NON_SECURE));
+	register_interrupt_type_handler(INTR_TYPE_EL3, generic_mb_interrupt_handler, int_flag);
+
+	rpi4_vc_get_board_revision(&ClockRate);
+	INFO("board rev %x\n",ClockRate);
+	rpi4_vc_get_clock(&ClockRate);
+	INFO("clock rate %d\n",ClockRate);
+	rpi4_vc_max_clock(&ClockRate);
+	INFO("max clock rate %d\n",ClockRate);
 }
