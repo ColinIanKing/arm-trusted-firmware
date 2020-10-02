@@ -12,8 +12,6 @@
 
 #include <drivers/rpi3/mailbox/rpi3_mbox.h>
 
-#include "RpiMbox.h"
-
 #define RPI3_MBOX_BUFFER_SIZE		U(256)
 static uint8_t __aligned(16) rpi3_mbox_buffer[RPI3_MBOX_BUFFER_SIZE];
 
