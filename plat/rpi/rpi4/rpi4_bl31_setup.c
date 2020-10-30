@@ -12,6 +12,7 @@
 #include <arch_helpers.h>
 #include <bl31/interrupt_mgmt.h>
 #include <common/bl_common.h>
+#include <lib/libc/endian.h>
 #include <lib/mmio.h>
 #include <lib/xlat_tables/xlat_mmu_helpers.h>
 #include <lib/xlat_tables/xlat_tables_defs.h>
@@ -262,6 +263,13 @@ int rpi4_vc_get_clock(uint32_t *clock);
 int rpi4_vc_max_clock(uint32_t *clock);
 int rpi4_vc_set_clock(uint32_t clock);
 
+struct pcc_region_t {
+		uint32_t Signature;
+		uint16_t Command;
+		uint16_t Status;
+		uint8_t  ComSpace[8];
+} __packed;
+
 static uint64_t generic_mb_interrupt_handler(uint32_t id,
 											 uint32_t flags,
 											 void *handle,
@@ -278,21 +286,42 @@ static uint64_t generic_mb_interrupt_handler(uint32_t id,
 	console_flush();
 
 	if (intr == SECURE_TRIGGER) {
+		struct pcc_region_t *pcc_region = (struct pcc_region_t *)0x1f0000;
 		mbox_val = mmio_read_32(0xFF800000+0xc0);
 		mmio_write_32(0xFF800000+0xc0, mbox_val);
 
-//		ERROR("interrupt: request clock to %d\n", mbox_val);
+		if (mbox_val == 0x10000000) {
+			// PCC opp // clock here 0xFE003004, adjust by ClockRate below
+			// eat the DT base addr at 0x1f0000
+			// a command=0 is a read, a command = 1 is a write (we shouldn't see those yet)
+			if (pcc_region->Command == 0) {
+				uint32_t counter = mmio_read_32(0xFE003004);
 
-		if (mbox_val > 2200) {
-			mbox_val = 2200;
-		} else if (mbox_val < 600) {
-			mbox_val = 600;
+				rpi4_vc_get_clock(&ClockRate);
+				le32enc(&pcc_region->ComSpace[0], counter); // Reference counter register (PPERF)
+				ClockRate/=100000000; //deal with 100 mhz
+				counter*=ClockRate;
+				counter/=15;
+				le32enc(&pcc_region->ComSpace[4], counter); // Delivered counter register (APERF)
+			}
+			else
+				ERROR("interrupt: PCC handshake cmd=%x stat=%x (%x:%x:%x:%x:%x:%x:%x:%x)\n", pcc_region->Command, pcc_region->Status,pcc_region->ComSpace[0],pcc_region->ComSpace[1],pcc_region->ComSpace[2],pcc_region->ComSpace[3],pcc_region->ComSpace[4],pcc_region->ComSpace[5],pcc_region->ComSpace[6],pcc_region->ComSpace[7]);
+
 		}
+		else {
+			if (mbox_val > 2200) {
+				mbox_val = 2200;
+			} else if (mbox_val < 600) {
+				mbox_val = 600;
+			}
 
-		rpi4_vc_set_clock(mbox_val*1000000);
+			rpi4_vc_set_clock(mbox_val*1000000);
+		}
+		// clear any existing pcc commands
+		pcc_region->Signature = 0x50434300; //channel 0
+		pcc_region->Command = 0;
+		pcc_region->Status = 0x1; //last command complete
 
-		rpi4_vc_get_clock(&ClockRate);
-//		ERROR("clock rate %d\n",ClockRate);
 	}
 
 	plat_ic_end_of_interrupt(irq);
