@@ -62,7 +62,7 @@ int rpi4_vc_set_clock(uint32_t clock)
 
 	assert(revision != NULL);
 
-	VERBOSE("rpi4: mbox: Sending request at %p\n", (void *)req);
+//	VERBOSE("rpi4: mbox: Sending request at %p\n", (void *)req);
 
 	req->size = sizeof(rpi3_mbox_buffer);
 	req->code = RPI3_MBOX_PROCESS_REQUEST;
@@ -102,7 +102,7 @@ int rpi4_vc_get_clock(uint32_t *clock)
 
 	assert(revision != NULL);
 
-	VERBOSE("rpi4: mbox: Sending request at %p\n", (void *)req);
+//	VERBOSE("rpi4: mbox: Sending request at %p\n", (void *)req);
 
 	req->size = sizeof(rpi3_mbox_buffer);
 	req->code = RPI3_MBOX_PROCESS_REQUEST;
