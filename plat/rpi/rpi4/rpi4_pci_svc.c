@@ -2,6 +2,17 @@
  * Copyright (c) 2021, ARM Limited and Contributors. All rights reserved.
  *
  * SPDX-License-Identifier: BSD-3-Clause
+ *
+ * The RPi4 has a single nonstandard PCI config region. It is broken into two
+ * pieces, the root port config registers and a window to a single device's
+ * config space which can move between devices. There isn't (yet) an
+ * authoritative public document on this since the available BCM2711 reference
+ * notes that there is a PCIe root port in the memory map but doesn't describe
+ * it. Given that it's not ECAM compliant yet reasonably simple, it makes for
+ * an excellent example of the PCI SMCCC interface.
+ *
+ * The PCI SMCCC interface is described in DEN0115 availabe from:
+ * https://developer.arm.com/documentation/den0115/latest
  */
 
 #include <assert.h>
@@ -20,7 +31,7 @@
 
 static spinlock_t pci_lock;
 
-#define PCIE_REG_BASE		0xfd500000
+#define PCIE_REG_BASE		U(RPI_IO_BASE + 0x01500000)
 #define PCIE_MISC_PCIE_STATUS	0x4068
 #define PCIE_EXT_CFG_INDEX	0x9000
 /* A small window pointing at the ECAM of the device selected by CFG_INDEX */
@@ -44,7 +55,13 @@ static uint64_t pci_segment_lib_get_base(uint32_t address, uint32_t offset)
 
 	/* The root port is at the base of the PCIe register space */
 	if (address != 0U) {
-		/* The current device is at CFG_DATA */
+		/*
+		 * The current device must be at CFG_DATA, a 4K window mapped,
+		 * via CFG_INDEX, to the device we are accessing. At the same
+		 * time we must avoid accesses to certain areas of the cfg
+		 * space via CFG_DATA. Detect those accesses and report that
+		 * the address is invalid.
+		 */
 		base += PCIE_EXT_CFG_DATA;
 		bus = PCI_ADDR_BUS(address);
 		dev = PCI_ADDR_DEV(address);
@@ -53,8 +70,8 @@ static uint64_t pci_segment_lib_get_base(uint32_t address, uint32_t offset)
 			  (dev << PCIE_EXT_DEV_SHIFT) |
 			  (fun << PCIE_EXT_FUN_SHIFT);
 
-		/* RPi weirdness, only allow dev = 0 on root port */
-		if ((bus == 0U) && (dev > 0U)) {
+		/* Allow only dev = 0 on root port and bus 1 */
+		if ((bus < 2U) && (dev > 0U)) {
 			return INVALID_PCI_ADDR;
 		}
 
@@ -64,11 +81,7 @@ static uint64_t pci_segment_lib_get_base(uint32_t address, uint32_t offset)
 			return INVALID_PCI_ADDR;
 		}
 
-		/* RPi weirdness, only allow dev = 0 on first bus */
-		if ((bus == 1U) && (dev > 0U)) {
-			return INVALID_PCI_ADDR;
-		}
-
+		/* Adjust which device the CFG_DATA window is pointing at */
 		mmio_write_32(PCIE_REG_BASE + PCIE_EXT_CFG_INDEX, address);
 	}
 	return base + offset;
@@ -76,7 +89,7 @@ static uint64_t pci_segment_lib_get_base(uint32_t address, uint32_t offset)
 
 /**
  * pci_read_config() - Performs a config space read at addr
- * @addr: 32-bit, segment, BDF of requested function.
+ * @addr: 32-bit, segment, BDF of requested function encoded per DEN0115
  * @off:  register offset of function described by @addr to read
  * @sz:	  size of read (8,16,32) bits.
  * @val:  returned zero extended value read from config space
@@ -100,8 +113,6 @@ uint32_t pci_read_config(uint32_t addr, uint32_t off, uint32_t sz, uint32_t *val
 	uint32_t ret = SMC_PCI_CALL_SUCCESS;
 	uint64_t base;
 
-	*val = 0;
-
 	spin_lock(&pci_lock);
 	base = pci_segment_lib_get_base(addr, off);
 
@@ -119,6 +130,7 @@ uint32_t pci_read_config(uint32_t addr, uint32_t off, uint32_t sz, uint32_t *val
 			*val = mmio_read_32(base);
 			break;
 		default: /* should be unreachable */
+			*val = 0;
 			ret = SMC_PCI_CALL_INVAL_PARAM;
 		}
 	}
@@ -128,7 +140,7 @@ uint32_t pci_read_config(uint32_t addr, uint32_t off, uint32_t sz, uint32_t *val
 
 /**
  * pci_write_config() - Performs a config space write at addr
- * @addr: 32-bit, segment, BDF of requested function.
+ * @addr: 32-bit, segment, BDF of requested function encoded per DEN0115
  * @off:  register offset of function described by @addr to write
  * @sz:	  size of write (8,16,32) bits.
  * @val:  value to be written
