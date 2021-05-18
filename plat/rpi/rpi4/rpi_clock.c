@@ -164,3 +164,115 @@ int rpi4_vc_max_clock(uint32_t *clock)
 
 	return 0;
 }
+
+
+int rpi4_vc_set_pwm(uint32_t val)
+{
+	uint32_t tag_request_size = sizeof(uint32_t)*3;
+	rpi3_mbox_request_t *req = (rpi3_mbox_request_t *) rpi3_mbox_buffer;
+
+	assert(revision != NULL);
+
+	VERBOSE("rpi4: mbox: Sending set pwm at %p\n", (void *)req);
+
+	req->size = sizeof(rpi3_mbox_buffer);
+	req->code = RPI3_MBOX_PROCESS_REQUEST;
+
+	req->tags[0] = RPI_MBOX_SET_POE_HAT_VAL;
+	req->tags[1] = tag_request_size; /* Space available for the response */
+	req->tags[2] = RPI3_TAG_REQUEST;
+	req->tags[3] = 0;   // default PWM
+	req->tags[4] = val; // speed
+	req->tags[5] = 0;   // speed
+	req->tags[6] = RPI3_TAG_END;
+
+	rpi3_vc_mailbox_request_send(req, RPI3_MBOX_BUFFER_SIZE);
+
+	if (req->code != RPI3_MBOX_REQUEST_SUCCESSFUL) {
+		ERROR("rpi4: mbox: set pwm Code = 0x%08x\n", req->code);
+		return -1;
+	}
+
+	if (req->tags[2] != (RPI3_TAG_IS_RESPONSE | tag_request_size)) {
+		ERROR("rpi4: mbox: set pwm failed (0x%08x)\n",
+		      req->tags[2]);
+		return -1;
+	}
+
+	return 0;
+}
+
+
+int rpi4_vc_get_pwm(uint32_t *val)
+{
+	uint32_t tag_request_size = sizeof(uint32_t)*3;
+	rpi3_mbox_request_t *req = (rpi3_mbox_request_t *) rpi3_mbox_buffer;
+
+	assert(revision != NULL);
+
+	VERBOSE("rpi4: mbox: Sending get pwm at %p\n", (void *)req);
+
+	req->size = sizeof(rpi3_mbox_buffer);
+	req->code = RPI3_MBOX_PROCESS_REQUEST;
+
+	req->tags[0] = RPI_MBOX_GET_POE_HAT_VAL;
+	req->tags[1] = tag_request_size; /* Space available for the response */
+	req->tags[2] = RPI3_TAG_REQUEST;
+	req->tags[3] = 0;   // Current PWM
+	req->tags[4] = 0;   // speed
+	req->tags[5] = 0;   // speed
+	req->tags[6] = RPI3_TAG_END;
+
+	rpi3_vc_mailbox_request_send(req, RPI3_MBOX_BUFFER_SIZE);
+
+	if (req->code != RPI3_MBOX_REQUEST_SUCCESSFUL) {
+		ERROR("rpi4: mbox: get pwm Code = 0x%08x\n", req->code);
+		return -1;
+	}
+
+	if (req->tags[2] != (RPI3_TAG_IS_RESPONSE | tag_request_size)) {
+		ERROR("rpi4: mbox: get pwm failed (0x%08x)\n", req->tags[2]);
+		return -1;
+	}
+
+	*val = req->tags[4];
+
+	VERBOSE("rpi4: mbox: get pwm %d\n", *val);
+
+	return 0;
+}
+
+int rpi4_vc_set_power(uint32_t device,uint32_t state, uint32_t wait)
+{
+	uint32_t tag_request_size = sizeof(uint32_t)*2;
+	rpi3_mbox_request_t *req = (rpi3_mbox_request_t *) rpi3_mbox_buffer;
+
+	assert(revision != NULL);
+
+	VERBOSE("rpi4: mbox: Sending set power at %p\n", (void *)req);
+
+	req->size = sizeof(rpi3_mbox_buffer);
+	req->code = RPI3_MBOX_PROCESS_REQUEST;
+
+	req->tags[0] = RPI_MBOX_SET_POWER_STATE;
+	req->tags[1] = tag_request_size; /* Space available for the response */
+	req->tags[2] = RPI3_TAG_REQUEST;
+	req->tags[3] = device;   // Current PWM
+	req->tags[4] = (state ? RPI_MBOX_POWER_STATE_ENABLE : 0) |
+                   (wait ? RPI_MBOX_POWER_STATE_WAIT : 0);
+	req->tags[5] = RPI3_TAG_END;
+
+	rpi3_vc_mailbox_request_send(req, RPI3_MBOX_BUFFER_SIZE);
+
+	if (req->code != RPI3_MBOX_REQUEST_SUCCESSFUL) {
+		ERROR("rpi4: mbox: set power Code = 0x%08x\n", req->code);
+		return -1;
+	}
+
+	if (req->tags[2] != (RPI3_TAG_IS_RESPONSE | tag_request_size)) {
+		ERROR("rpi4: mbox: set power failed (0x%08x)\n", req->tags[2]);
+		return -1;
+	}
+
+	return 0;
+}
