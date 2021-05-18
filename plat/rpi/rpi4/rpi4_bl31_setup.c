@@ -262,6 +262,9 @@ int rpi4_vc_get_board_revision(uint32_t *revision);
 int rpi4_vc_get_clock(uint32_t *clock);
 int rpi4_vc_max_clock(uint32_t *clock);
 int rpi4_vc_set_clock(uint32_t clock);
+int rpi4_vc_set_pwm(uint32_t val);
+int rpi4_vc_get_pwm(uint32_t *val);
+int rpi4_vc_set_power(uint32_t device,uint32_t state, uint32_t wait);
 
 struct pcc_region_t {
 		uint32_t Signature;
@@ -286,11 +289,13 @@ static uint64_t generic_mb_interrupt_handler(uint32_t id,
 	console_flush();
 
 	if (intr == SECURE_TRIGGER) {
-		struct pcc_region_t *pcc_region = (struct pcc_region_t *)0x1f0000;
+		struct pcc_region_t *pcc_region;
 		mbox_val = mmio_read_32(0xFF800000+0xc0);
 		mmio_write_32(0xFF800000+0xc0, mbox_val);
 
-		if (mbox_val == 0x10000000) {
+		if (mbox_val & 0x10000000) { //region 1
+			pcc_region = (struct pcc_region_t *)0x1f0000;
+
 			// PCC opp // clock here 0xFE003004, adjust by ClockRate below
 			// eat the DT base addr at 0x1f0000
 			// a command=0 is a read, a command = 1 is a write (we shouldn't see those yet)
@@ -307,6 +312,28 @@ static uint64_t generic_mb_interrupt_handler(uint32_t id,
 			else
 				ERROR("interrupt: PCC handshake cmd=%x stat=%x (%x:%x:%x:%x:%x:%x:%x:%x)\n", pcc_region->Command, pcc_region->Status,pcc_region->ComSpace[0],pcc_region->ComSpace[1],pcc_region->ComSpace[2],pcc_region->ComSpace[3],pcc_region->ComSpace[4],pcc_region->ComSpace[5],pcc_region->ComSpace[6],pcc_region->ComSpace[7]);
 
+			// clear any existing pcc commands
+			pcc_region->Signature = 0x50434300; //channel 0
+			pcc_region->Command = 0;
+			pcc_region->Status = 0x1; //last command complete
+
+		}
+		if (mbox_val & 0x20000000) { //region 2
+			pcc_region = (struct pcc_region_t *)0x1f0080;
+			rpi4_vc_get_pwm(&ClockRate);
+
+			ERROR("interrupt: PCC handshake cmd=%x stat=%x (%x:%x:%x:%x:%x:%x:%x:%x)\n", pcc_region->Command, pcc_region->Status,pcc_region->ComSpace[0],pcc_region->ComSpace[1],pcc_region->ComSpace[2],pcc_region->ComSpace[3],pcc_region->ComSpace[4],pcc_region->ComSpace[5],pcc_region->ComSpace[6],pcc_region->ComSpace[7]);
+
+			// clear any existing pcc commands
+			pcc_region->Signature = 0x50434301; //channel 1
+			pcc_region->Command = 0;
+			pcc_region->Status = 0x1; //last command complete
+
+		}
+		if (mbox_val & 0x40000000) {
+			// lets just set the fan speed (0-255)
+			rpi4_vc_set_pwm(mbox_val & 0xFF);
+			INFO("Fan speed %d\n",mbox_val & 0xFF);
 		}
 		else {
 			if (mbox_val > 2200) {
@@ -317,16 +344,25 @@ static uint64_t generic_mb_interrupt_handler(uint32_t id,
 
 			rpi4_vc_set_clock(mbox_val*1000000);
 		}
-		// clear any existing pcc commands
-		pcc_region->Signature = 0x50434300; //channel 0
-		pcc_region->Command = 0;
-		pcc_region->Status = 0x1; //last command complete
+		{
+			pcc_region = (struct pcc_region_t *)0x1f0000;
+			pcc_region->Signature = 0x50434300; //channel 0
+			pcc_region->Command = 0;
+			pcc_region->Status = 0x1; //last command complete
+			pcc_region = (struct pcc_region_t *)0x1f0080;
+			pcc_region->Signature = 0x50434301; //channel 1
+			pcc_region->Command = 0;
+			pcc_region->Status = 0x1; //last command complete
+		}
 
 	}
 
 	plat_ic_end_of_interrupt(irq);
 	return 0;
 }
+
+#include <drivers/delay_timer.h>
+volatile uint32_t cntr;
 
 void bl31_platform_setup(void)
 {
@@ -345,10 +381,41 @@ void bl31_platform_setup(void)
 	set_interrupt_rm_flag((int_flag), (NON_SECURE));
 	register_interrupt_type_handler(INTR_TYPE_EL3, generic_mb_interrupt_handler, int_flag);
 
+    rpi4_vc_set_power(4,1,1);
+    rpi4_vc_set_power(5,1,1);
+    rpi4_vc_set_power(6,1,1);
+
+
 	rpi4_vc_get_board_revision(&ClockRate);
 	INFO("board rev %x\n",ClockRate);
 	rpi4_vc_get_clock(&ClockRate);
 	INFO("clock rate %d\n",ClockRate);
 	rpi4_vc_max_clock(&ClockRate);
 	INFO("max clock rate %d\n",ClockRate);
+
+	rpi4_vc_set_pwm(0); //go into uefi with fan off
+
+	{
+		struct pcc_region_t *pcc_region;
+		pcc_region = (struct pcc_region_t *)0x1f0000;
+		pcc_region->Signature = 0x50434300; //channel 0
+		pcc_region->Command = 0;
+		pcc_region->Status = 0x1; //last command complete
+		pcc_region = (struct pcc_region_t *)0x1f0080;
+		pcc_region->Signature = 0x50434301; //channel 1
+		pcc_region->Command = 0;
+		pcc_region->Status = 0x1; //last command complete
+	}
+
+/*
+	for (int_flag=0;int_flag<255;int_flag++)
+	{
+
+		rpi4_vc_get_pwm(&ClockRate);
+		INFO("current pwm rate %d\n",ClockRate);
+		rpi4_vc_set_pwm(int_flag);
+		rpi4_vc_get_pwm(&ClockRate);
+		INFO("current pwm rate %d\n",ClockRate);
+        for (cntr=0;cntr<1000000;cntr++);
+	}*/
 }

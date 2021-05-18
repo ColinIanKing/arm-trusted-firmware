@@ -25,9 +25,12 @@ typedef struct __packed __aligned(16) rpi3_mbox_request {
 
 /* Command constants */
 #define RPI3_TAG_HARDWARE_GET_BOARD_REVISION	U(0x00010002)
+#define RPI_MBOX_SET_POWER_STATE                U(0x00028001)
 #define RPI_MBOX_GET_CLOCK_RATE					U(0x00030002)
 #define RPI_MBOX_GET_MAX_CLOCK_RATE				U(0x00030004)
 #define RPI_MBOX_GET_MIN_CLOCK_RATE				U(0x00030007)
+#define RPI_MBOX_GET_POE_HAT_VAL                U(0x00030049)
+#define RPI_MBOX_SET_POE_HAT_VAL                U(0x00030050)
 #define RPI_MBOX_SET_CLOCK_RATE					U(0x00038002)
 
 #define RPI3_TAG_END				U(0x00000000)
@@ -49,6 +52,11 @@ typedef struct __packed __aligned(16) rpi3_mbox_request {
 #define RPI_MBOX_CLOCK_RATE_SDRAM				 U(0x000000008)
 #define RPI_MBOX_CLOCK_RATE_PIXEL				 U(0x000000009)
 #define RPI_MBOX_CLOCK_RATE_PWM					 U(0x00000000a)
+
+
+#define RPI_MBOX_POWER_STATE_ENABLE                           1
+#define RPI_MBOX_POWER_STATE_WAIT                             2
+
 
 void rpi3_vc_mailbox_request_send(rpi3_mbox_request_t *req, int req_size);
 
